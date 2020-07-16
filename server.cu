@@ -53,6 +53,23 @@ __global__ void changeRowsKernel(
     }
 }
 
+__global__ void selectKernel(
+    int* deviceDatabase,
+    int numberOfRows,
+    int numberOfAttributes,
+    int* selectedValues,
+    int selectionCol,
+    int conditionCol,
+    int conditionValue,
+    int* endIndexSelectedValues
+)
+{
+    int id = blockIdx.x*blockDim.x+threadIdx.x;
+    if(id < numberOfAttributes && deviceDatabase[id*numberOfAttributes+conditionCol] == conditionValue){
+        int i = atomicAdd(endIndexSelectedValues, 1);
+        selectedValues[i] = deviceDatabase[id*numberOfAttributes+selectionCol];
+    }
+}
 
 class DatabaseManagementSystem{
 private:
@@ -118,6 +135,39 @@ public:
         cout << "Write Completed!!" << endl;
     }
 
+    set<int> Select(
+        string selectionAttribute,
+        string conditionAttribute,
+        int conditionValue
+    ){
+        int* selectedValues;
+        int* endIndexSelectedValues;
+        int* retArr;
+        int temp = 0;
+        int size;
+        int selectionCol = attributesToCol[selectionAttribute];
+        int conditionCol = attributesToCol[conditionAttribute];
+        cudaMalloc(&selectedValues, numberOfRows*sizeof(int));
+        cudaMalloc(&endIndexSelectedValues, sizeof(int));        
+        cudaMemcpy(selectedValues, &temp, sizeof(int), cudaMemcpyHostToDevice);
+        init_bt(numberOfRows);
+        selectKernel<<<nb, nt>>>(
+            deviceDatabase,
+            numberOfRows,
+            numberOfAttributes,
+            selectedValues,
+            selectionCol,
+            conditionCol,
+            conditionValue,
+            endIndexSelectedValues
+        );
+        cudaMemcpy(&size, endIndexSelectedValues, sizeof(int), cudaMemcpyDeviceToHost);
+        retArr = new int[size];
+        cudaMemcpy(retArr, selectedValues, size*sizeof(int), cudaMemcpyDeviceToHost);
+        set<int> ret(retArr, retArr+size);
+        return ret;
+    }
+
     void PrintDatabase(){
         int* hostDatabase = new int[numberOfAttributes*numberOfRows];
         cudaMemcpy(hostDatabase, deviceDatabase, numberOfAttributes*numberOfRows*sizeof(int), cudaMemcpyDeviceToHost);
@@ -154,7 +204,7 @@ int main(){
 
     dbms.PrintDatabase();
 
-    int q;
+    innt q;
     cin >> q;
     while(q--){
         int numberOfRowsToBeModified;
@@ -170,6 +220,23 @@ int main(){
             hostRowsToBeModified
         );
         dbms.PrintDatabase();
+    }
+
+    int t;
+    cin >> t;
+    while(t--){
+        string selectionAttribute, conditionAttribute;
+        int conditionValue;
+        cin >> selectionAttribute >> conditionAttribute >> conditionValue;
+        auto Values = dbms.Select(
+            selectionAttribute,
+            conditionAttribute,
+            conditionValue
+        );
+        for(auto val: Values){
+            cout << val << " ";
+        }
+        cout << endl;
     }
     return 0;
 }
