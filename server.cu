@@ -264,7 +264,7 @@ public:
     GPSsystem(int numVert, int* initMat){
         numberOfVertices = numVert;
         hostAdjacencyMatrix = new int[numberOfVertices*numberOfVertices];
-        for(int i = 0; i < numberOfVertices*numberOfVertices; i ++){
+        for(int i = 0; i < numberOfVertices*numberOfVertices; i++){
             hostAdjacencyMatrix[i] = initMat[i];
         }
     }
