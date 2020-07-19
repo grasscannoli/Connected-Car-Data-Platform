@@ -10,6 +10,7 @@ void run_state()
     {
         Schema obj();
         obj.vehicle_id =  getpid();
+        obj.
         
         write(write_fd,&bj,sizeof(obj));
     }
