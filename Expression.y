@@ -43,6 +43,7 @@ Select_Query: SelectCol DistinctQualifier Where Exp GroupExp OrderExp Limit Valu
 }
 | SelectCol Where 
 ;
+AggCol: AggCol 
 SelectCol: Identifier MultiCol
 {
 	$$ = $2;
