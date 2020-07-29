@@ -19,5 +19,5 @@ public:
     bool hard_steer;
     double speed;
     double distance;
-    Schema(){}
+    Schema(){}  
 };
