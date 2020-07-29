@@ -1,10 +1,11 @@
-#include<bits/stdc++.h>
-#include<cuda.h>
-#include<thrust/device_vector.h>
-
-using namespace std;
-
-
+#include <string>
+#include <vector>
+#include <map>
+#include <cuda.h>
+#include <limits.h>
+#include <schema.h>
+#include <thrust/device_vector.h>
+Limits l();
 int nt, nb;
 void init_bt(int val){
     // initialize the num thread blks and grids:
@@ -18,43 +19,18 @@ void init_bt(int val){
     }
 }
 
-__global__ void setRowMapKernel(
-    int numberOfRows,
-    int numberOfRowsToBeModified,
-    int numberOfAttributes,
-    int primaryKey,
-    int* deviceMapToRows,
-    int* deviceRowsToBeModified,
-    int* deviceDatabase
+__global__ void changeRowsKernel(int numberOfRowsToBeModified,Schema* deviceRowsToBeModified, Schema* StateDatabase
 )
 {
     int id = blockIdx.x*blockDim.x+threadIdx.x;
-    int j = id/numberOfRows;
-    int i = id%numberOfRows;
-    if(j < numberOfRowsToBeModified && deviceDatabase[numberOfAttributes*i+primaryKey] == deviceRowsToBeModified[numberOfAttributes*j+primaryKey]){
-        deviceMapToRows[j] = i;
-    }
-}
-
-__global__ void changeRowsKernel(
-    int numberOfRowsToBeModified,
-    int numberOfAttributes,
-    int* deviceMapToRows,
-    int* deviceRowsToBeModified, 
-    int* deviceDatabase
-)
-{
-    int id = blockIdx.x*blockDim.x+threadIdx.x;
-    int j = id/numberOfRowsToBeModified;
-    int k = id%numberOfRowsToBeModified;
-    if(j < numberOfAttributes){
-        int i = deviceMapToRows[k];
-        deviceDatabase[i*numberOfAttributes+j] = deviceRowsToBeModified[k*numberOfAttributes+j];
+    if(id < numberOfRowsToBeModified)
+    {
+        StateDatabase[deviceRowsToBeModified[id].database_index] = deviceRowsToBeModified[id];
     }
 }
 
 __global__ void selectKernel(
-    int* deviceDatabase,
+    int* StateDatabase,
     int numberOfRows,
     int numberOfAttributes,
     int* selectedValues,
@@ -65,81 +41,151 @@ __global__ void selectKernel(
 )
 {
     int id = blockIdx.x*blockDim.x+threadIdx.x;
-    if(id < numberOfAttributes && deviceDatabase[id*numberOfAttributes+conditionCol] == conditionValue){
+    if(id < numberOfAttributes && StateDatabase[id*numberOfAttributes+conditionCol] == conditionValue){
         int i = atomicAdd(endIndexSelectedValues, 1);
-        selectedValues[i] = deviceDatabase[id*numberOfAttributes+selectionCol];
+        selectedValues[i] = StateDatabase[id*numberOfAttributes+selectionCol];
     }
 }
 
 class DatabaseManagementSystem{
 private:
-    int* deviceDatabase;
-    const int numberOfAttributes;
+    Schema* StateDatabase;//The table is represented by an object array. Primary keys are as intended.
+    int* anomaly_states;//This table is to track state transitions for anomaly detection.
+    int num_states;
+    map<int,Schema> work_list;//stores a worklist of vaious queries to lazily update. State updates happen here.
     const int numberOfRows;
-    const int primaryKey;
-    map<string, int> attributesToCol;
 public:
-
     DatabaseManagementSystem(
-        int numAtt,
         int numRows, 
-        int pKey,
-        vector<string> attList, 
-        int* initTable
+        Schema* initTable
+        int* anomaly_states;
     ):
-        numberOfAttributes(numAtt),
-        numberOfRows(numRows),
-        primaryKey(pKey)
+        numberOfRows(numRows)
     {
-        for(int i = 0; i < numberOfAttributes; i ++) attributesToCol[attList[i]] = i;
-        cudaMalloc(&deviceDatabase, numberOfAttributes*numberOfRows*sizeof(int));
-        cudaMemcpy(deviceDatabase, initTable, numberOfAttributes*numberOfRows*sizeof(int), cudaMemcpyHostToDevice);        
+        cudaMalloc(&StateDatabase, numberOfRows*sizeof(Schema));
+        num_states = 10;
+        anomaly_states = (int*)calloc(num_states * numberOfRows,sizeof(int));
+        cudaMemcpy(StateDatabase, initTable, numberOfRows*sizeof(Schema), cudaMemcpyHostToDevice);        
     }
 
-    
-    void WriteRows(int numberOfRowsToBeModified, int* hostRowsToBeModified){
+    void state_update(Schema& s)
+    {
+        int ind = s.database_index;
+        int* row = (anomaly_states + num_states*ind);
+        if(s.oil_life_pct < l.min_oil_level)
+        {
+            row[0] = min(row[0]+1,l.oil_violation_time);
+            if(row[0] == l.oil_violation_time)
+                //anomaly
+        }
+        else
+            row[0] = 0;
+        if(s.tire_p_rl < l.min_pressure)
+        {
+            row[1] = min(row[1]+1,l.pressure_violation_time);
+            if(row[1] == l.pressure_violation_time)
+                //anomaly
+        }
+        else
+            row[1] = 0;
+        if(s.tire_p_rl < l.min_pressure)
+        {
+            row[2] = min(row[1]+1,l.pressure_violation_time);
+            if(row[2] == l.pressure_violation_time)
+                //anomaly
+        }
+        else
+            row[2] = 0;
+        if(s.tire_p_rl < l.min_pressure)
+        {
+            row[3] = min(row[1]+1,l.pressure_violation_time);
+            if(row[3] == l.pressure_violation_time)
+                //anomaly
+        }
+        else
+            row[3] = 0;
+        if(s.tire_p_rl < l.min_pressure)
+        {
+            row[4] = min(row[1]+1,l.pressure_violation_time);
+            if(row[4] == l.pressure_violation_time)
+                //anomaly
+        }
+        else
+            row[4] = 0;
+        if(s.batt_volt < s.min_voltage)
+        {
+            row[5] = min(row[5]+1,l.voltage_violation_time);
+            if(row[5] == l.voltage_violation_time)
+                //anomaly
+        }
+        else
+            row[5] = 0;
+        if(s.fuel_percentage < l.min_fuel_percentage)
+        {
+            row[6] = min(row[6]+1,l.fuel_violation_time);
+            if(row[6] == l.fuel_violation_time)
+                //anomaly
+        }
+        else
+            row[6] = 0;
+        if(s.hard_brake)
+        {
+            row[7] = min(row[7]+1,l.brake_violation_time);
+            if(row[1] == l.brake_violation_time)
+                //anomaly
+        }
+        else
+            row[7] = 0;
+        if(!s.door_lock)
+        {
+            row[8] = min(row[8]+1,l.door_violation_time);
+            if(row[1] == l.door_violation_time)
+                //anomaly
+        }
+        else
+            row[8] = 0;
+        if(s.hard_steer)
+        {
+            row[9] = min(row[9]+1,l.steer_violation_time);
+            if(row[1] == l.steer_violation_time)
+                //anomaly
+        }
+    }
+    void update_worklist(Schema& s)
+    {
+        state_update(s);
+        work_list[s.database_index] = s;//update the schema object being stored.
+    }
+
+    vector<Schema> get_pending_writes()
+    {
+        vector<Schema> v;
+        for(auto it: work_list)
+            v.push_back(it.second);
+        return v;
+    }
+
+    void WriteRows(vector<Schema> RowsToBeWritten){
         // Find the row numbers to be modified in the database
         // This is done parallely, using the fact that the primary key of each row
         // in the argument rowsToBeModified uniquely defines a row in the actual database.
-        int* deviceRowsToBeModified;
-        int* deviceMapToRows;
-        cudaMalloc(&deviceRowsToBeModified, numberOfRowsToBeModified*numberOfAttributes*sizeof(int));
-        cudaMalloc(&deviceMapToRows, numberOfRowsToBeModified*sizeof(int));
-        cudaMemcpy(deviceRowsToBeModified, hostRowsToBeModified, numberOfRowsToBeModified*numberOfAttributes*sizeof(int), cudaMemcpyHostToDevice);
-        
-        cout << "Starting map compute" << endl;
-        init_bt(numberOfRows*numberOfRowsToBeModified);
-        setRowMapKernel<<<nb, nt>>>(
-            numberOfRows,
-            numberOfRowsToBeModified,
-            numberOfAttributes,
-            primaryKey,
-            deviceMapToRows,
-            deviceRowsToBeModified,
-            deviceDatabase
-        );
-        cudaDeviceSynchronize();
-        cout << "Map Computed!!" << endl;
+        Schema* devicerowsToBeModified;
+        cudaMemcpy(deviceRowsToBeModified, hostRowsToBeModified, RowsToBeWritten.size()*sizeof(Schema), cudaMemcpyHostToDevice);
+        init_bt(RowsToBeWritten.size());//linear number of threads are enough.
         // The next task, using the row numbers acquired with the above kernel, 
         // fire numberOfAttributes*numRowsToBeModified threads to modify the cells 
         // of the actual database
-        init_bt(numberOfRowsToBeModified*numberOfAttributes);
         changeRowsKernel<<<nb, nt>>>(
             numberOfRowsToBeModified,
-            numberOfAttributes,
-            deviceMapToRows,
             deviceRowsToBeModified, 
-            deviceDatabase 
+            StateDatabase 
         );
         cudaDeviceSynchronize();
-        cout << "Write Completed!!" << endl;
+        //std::cout << "Write Completed!!" << endl;
     }
 
-    set<int> Select(
-        string selectionAttribute,
-        string conditionAttribute,
-        int conditionValue
-    ){
+    map<int,Schema> Select(vector<std::string> columns,std::string conditionAttribute,int conditionValue)
+    {
         int* selectedValues;
         int* endIndexSelectedValues;
         int* retArr;
@@ -147,12 +193,12 @@ public:
         int size;
         int selectionCol = attributesToCol[selectionAttribute];
         int conditionCol = attributesToCol[conditionAttribute];
-        cudaMalloc(&selectedValues, numberOfRows*sizeof(int));
+        cudaMalloc(&selectedValues, numberOfRows*sizeof(int));//row indices that were selected 
         cudaMalloc(&endIndexSelectedValues, sizeof(int));        
         cudaMemcpy(selectedValues, &temp, sizeof(int), cudaMemcpyHostToDevice);
         init_bt(numberOfRows);
         selectKernel<<<nb, nt>>>(
-            deviceDatabase,
+            StateDatabase,
             numberOfRows,
             numberOfAttributes,
             selectedValues,
@@ -170,41 +216,28 @@ public:
 
     void PrintDatabase(){
         int* hostDatabase = new int[numberOfAttributes*numberOfRows];
-        cudaMemcpy(hostDatabase, deviceDatabase, numberOfAttributes*numberOfRows*sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(hostDatabase, StateDatabase, numberOfAttributes*numberOfRows*sizeof(int), cudaMemcpyDeviceToHost);
         for(int i = 0; i < numberOfRows; i ++){
             for(int j = 0; j < numberOfAttributes; j ++){
-                cout << hostDatabase[i*numberOfAttributes+j] << " ";
+                std::cout << hostDatabase[i*numberOfAttributes+j] << " ";
             }
-            cout << endl;
+            std::cout << endl;
         }
-        cout << endl;
+        std::cout << endl;
     }
 };
 
-__global__ void DropVerticesKernel(
-    int numberOfVertices,
-    int numberOfDroppedVertices,
-    int* deviceAdjacencyMatrix,
-    int* deviceDroppedVertices
-)
+__global__ void DropVerticesKernel(int numberOfVertices,int numberOfDroppedVertices,int* deviceAdjacencyMatrix,int* deviceDroppedVertices)
 {
     int id = blockIdx.x*blockDim.x+threadIdx.x;
-    int i = id/(numberOfVertices*numberOfVertices);
-    if(i < numberOfDroppedVertices){
-        int u = id%(numberOfVertices*numberOfVertices)/numberOfVertices;
-        int v = id%(numberOfVertices*numberOfVertices)%numberOfVertices;
-        if(deviceDroppedVertices[i] == u || deviceDroppedVertices[i] == v){
-            deviceAdjacencyMatrix[u*numberOfVertices+v] = INT_MAX;
-        }
-    }
+    int i = id/(numberOfVertices);
+    int j = id % numberOfVertices;
+    if(id < numberOfDroppedVertices*numberOfVertices)
+        atomicAnd(deviceAdjacencyMatrix + numberOfVertices*deviceDroppedVertices[i] + j,INT_MAX);
+}
 }
 
-__global__ void FindMinDistance(
-    int numberOfVertices,
-    int* deviceUsed,
-    int* deviceDistance,
-    int* minDistance
-)
+__global__ void FindMinDistance(int numberOfVertices,int* deviceUsed,int* deviceDistance,int* minDistance)
 {   
     // printf("init mindist = %d\n", *minDistance);
     int id = blockIdx.x*blockDim.x+threadIdx.x;
@@ -213,13 +246,7 @@ __global__ void FindMinDistance(
     }
 }
 
-__global__ void FindArgMin(
-    int numberOfVertices,
-    int* deviceUsed,
-    int* deviceDistance,
-    int* minDistance,
-    int* argMinVertex
-)
+__global__ void FindArgMin(int numberOfVertices,int* deviceUsed,int* deviceDistance,int* minDistance,int* argMinVertex)
 {
     int id = blockIdx.x*blockDim.x+threadIdx.x;
     if(id < numberOfVertices && !deviceUsed[id] && *minDistance == deviceDistance[id]){
@@ -276,25 +303,20 @@ public:
         int* deviceDroppedVertices;
         int* deviceAdjacencyMatrix;
         int idx = 0;
-        for(auto vertex: setDroppedVertices){
+        for(auto vertex: setDroppedVertices)
+        {
             hostDroppedVertices[idx++] = vertex;
         }
         cudaMalloc(&deviceDroppedVertices, numberOfDroppedVertices*sizeof(int));
         cudaMemcpy(deviceDroppedVertices, hostDroppedVertices, numberOfDroppedVertices*sizeof(int), cudaMemcpyHostToDevice);
         cudaMalloc(&deviceAdjacencyMatrix, numberOfVertices*numberOfVertices*sizeof(int));
         cudaMemcpy(deviceAdjacencyMatrix, hostAdjacencyMatrix, numberOfVertices*numberOfVertices*sizeof(int), cudaMemcpyHostToDevice);
-        if(numberOfDroppedVertices != 0){
-            init_bt(numberOfVertices*numberOfVertices*numberOfDroppedVertices);
-            DropVerticesKernel<<<nb, nt>>>(
-                numberOfVertices,
-                numberOfDroppedVertices,
-                deviceAdjacencyMatrix,
-                deviceDroppedVertices
-            );
+        if(numberOfDroppedVertices != 0)
+        {
+            init_bt(numberOfVertices*numberOfDroppedVertices);
+            DropVerticesKernel<<<nb, nt>>>(numberOfVertices,numberOfDroppedVertices,deviceAdjacencyMatrix,deviceDroppedVertices);
             cudaDeviceSynchronize();
         }
-        
-
         // Phase two, Implement Dijkstra:
         int  hostNumberOfUsedVertices = 0;
         int* minDistance;
@@ -356,14 +378,14 @@ public:
         cudaMemcpy(hostParent, deviceParent, numberOfVertices*sizeof(int), cudaMemcpyDeviceToHost);
         cudaMemcpy(hostDistance, deviceDistance, numberOfVertices*sizeof(int), cudaMemcpyDeviceToHost);
         for(int i = 0; i < numberOfVertices; i ++){
-            cout << hostDistance[i] << " ";
+            std::cout << hostDistance[i] << " ";
         }
-        cout << endl;
+        std::cout << endl;
         for(int i = 0; i < numberOfVertices; i ++){
-            cout << hostParent[i] << " ";
+            std::cout << hostParent[i] << " ";
         }
-        cout << endl;        
-        cout << endl;
+        std::cout << endl;        
+        std::cout << endl;
         
         if(hostDistance[destination] == INT_MAX) return vector<int>();
         vector<int> path;
@@ -406,16 +428,20 @@ int main(){
         }
         auto res = obj.PathFinder(source, destination, setOfDroppedVertices);
         for(auto v: res){
-            cout << v << " ";
+            std::cout << v << " ";
         }
-        cout << endl;
+        std::cout << endl;
     }
 }
-
+int main(int argc, char* argv[])
+{
+    int num_cars = 100;
+    int messages_per_second = 0;
+}
 // int main(){
 //     int numberOfRows, numberOfAttributes, pKey;
 //     cin >> numberOfRows >> numberOfAttributes >> pKey;
-//     vector<string> attList(numberOfAttributes);
+//     vector<std::string> attList(numberOfAttributes);
 //     for(int i = 0; i < numberOfAttributes; i ++){
 //         cin >> attList[i];
 //     }
@@ -456,7 +482,7 @@ int main(){
 //     int t;
 //     cin >> t;
 //     while(t--){
-//         string selectionAttribute, conditionAttribute;
+//         std::std::string selectionAttribute, conditionAttribute;
 //         int conditionValue;
 //         cin >> selectionAttribute >> conditionAttribute >> conditionValue;
 //         auto Values = dbms.Select(
@@ -465,9 +491,9 @@ int main(){
 //             conditionValue
 //         );
 //         for(auto val: Values){
-//             cout << val << " ";
+//             std::cout << val << " ";
 //         }
-//         cout << endl;
+//         std::cout << endl;
 //     }
 //     return 0;
 // }
