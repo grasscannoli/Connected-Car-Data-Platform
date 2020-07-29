@@ -1,7 +1,8 @@
 class Schema
 {
 public:
-    int vehicle_id;
+    int vehicle_id;//the process ID of the car serves as the vehicle ID.
+    int database_index;//fixed constant for mapping to the database purposes.
     double oil_life_pct;
     double tire_p_rl;
     double tire_p_rr;
@@ -13,7 +14,7 @@ public:
     bool seatbelt;
     bool hard_brake;
     bool door_lock;
-    bool gear_toogle;
+    bool gear_toggle;
     bool clutch;
     bool hard_steer;
     double speed;
