@@ -1,55 +1,115 @@
 %{
 	#include <iostream>
 	#include <string>
-    #include <cuda.h>
 	#include <stdlib.h>
 	#include <vector>
 	#include <map>
 	#include <pair>
+	#include <cmath>
 	#include "proj_types.h"
-	int yyerror (char* h);
-	int yylex(void);
+	void yyerror (SelectQuery* select_query,const char* error_msg);
+	int yyparse(SelectQuery* select_query);
+	int yylex_destroy(void);
+	int yy_scan_string(const char*);
 	map<std::string,int> column_map;  
 %}
 %union
 {
     double value;
     std::string identifier;
-	SelectQuery obj;
+	SelectQuery* SelectObject;
+	bool distinct;
+	ExpressionNode* expression;
+	std::vector<std::string> name_list;
+	std::vector<std::pair<std::string,ExpressionNode*>> expression_list;
+	std::vector<std::pair<ExpressionNode*,bool>> order_list;
 }
+%parse-param {SelectQuery* select_query}
 %start goal;
-%type <SelectQuery> goal
-%type <value> Integer
-%type <> RepeatedParametersExpression
-%type <> goal StatementStar Statement IfElseStatement MacroDefStatement MacroDefExpression MacroDefinition MacroDefinition_extended TypeDeclaration_extended TypeIdentifierExtended ClassDefinition PrimaryExpression Expression RepeatedParameters MethodDeclaration MethodDeclarationExtended MainClass TypeIdentifierComma
-%type <std::string> Identifier  AccessSpecifier Type
-%token Plus Minus Mult Div Modulo Semicolon Equal Comma OpeningBrace Identifier ClosingBrace OpeningBracket ClosingBracket OpeningSquareBracket ClosingSquareBracket Dot Return Main GreaterThan LessThan LessEqual GreaterEqual DoubleEqual NotEqual Or And Class While If Else True False New Length Define Hashtag Extends System Out Print Println Integer Public Private Protected Void Bool Not Static String This Int
+%type <SelectObject> goal Select_Query
+%type <value> LimitExp
+%type <distinct> DistinctQualifier
+%type <expression> WhereCondition Column GroupExp
+%type <expression_list> MultiAggCol AggCol
+%type <name_list> SelectCol MultiCol
+%type <order_list> OrderExp ExpList
+%type <expression> Exp1 Exp2 Exp3 Exp 
+%type <identifier> Column AggregateFunction 
+%token Plus Minus Mult Div Modulo NotEqual Equal Greater GreaterEqual Lesser LesserEqual Or And Not Where Order Group By Limit Distinct Ascending Descecding Comma OpeningBracket ClosingBracket Maximum Minimum Average Variance StandardDeviation Count Sum
 %%
-Select_Query: SelectCol DistinctQualifier Where Exp GroupExp OrderExp Limit Value
+goal: Select_Query
 {
-
-}
-| SelectCol Where Exp OrderExp Limit Value
+	$$ = $1;
+	*select_query = $$;
+};
+Select_Query: SelectCol DistinctQualifier WhereCondition GroupExp OrderExp LimitExp
 {
-
+	$$ = new SelectQuery();
+	$$->select_coumns = $1;
+	$$->distinct_query = $2;
+	$$->select_expression = $3;
+	$$->group_term = $4;
+	$$->order_term = $5;
+	$$->limit_term = $6;
 }
-| SelectCol Where Exp OrderExp
+| AggCol DistinctQualifier WhereCondition GroupExp OrderExp LimitExp
 {
-
-}
-| SelectCol Where Exp
+	$$ = new SelectQuery();
+	$$->aggregate_coumns = $1;
+	$$->distinct_query = $2;
+	$$->select_expression = $3;
+	$$->group_term = $4;
+	$$->order_term = $5;
+	$$->limit_term = $6;
+};
+DistinctQualifier: Distinct
 {
-
+	$$ = true;
 }
-| SelectCol Where 
-;
-AggCol: AggCol 
+|
+{
+	$$ = false;
+};
+WhereCondition: Where Exp
+{
+	$$ = $2;
+}
+| 
+{
+	$$ = NULL;
+};
+LimitExp: Limit Value
+{
+	$$ = $2;
+};
+| 
+{
+	$$ = -1;
+}
+AggCol: AggregateFunction OpeningBracket Exp ClosingBracket MultiAggCol
+{
+	$$ = $5;
+	$$.push_back(std::make_pair($1,$3));
+}
+|  
+{
+	$$ =  *(new std::vector<std::pair<std::string,ExpressionNode*>>);
+};
+MultiAggCol: MultiAggCol Comma AggregateFunction OpeningBracket Exp ClosingBracket
+{
+	$$ = $1;
+	$$.push_back(std::make_pair($3,$5));
+}
+| 
+{
+	$$ = (new std::vector<std::pair<std::string,ExpressionNode*>>);
+};
 SelectCol: Identifier MultiCol
 {
 	$$ = $2;
 	$$.push_back($1);
 }
-| Multiply
+| Mult
 {
 	$$ = *(new vector<std::string>);
 	for(auto it: column_map)
@@ -62,7 +122,7 @@ MultiCol: MultiCol Comma Identifier
 }	
 | 
 {
-	$$ = *(new vector<std::string>)
+	$$ = *(new vector<std::string>);
 };
 GroupExp: Group By Exp
 {
@@ -85,7 +145,7 @@ OrderExp: Order By Exp Order ExpList
 | 
 {
 	$$ = NULL;
-}
+};
 ExpList: ExpList Comma Exp
 {
 	$$ = $1;
@@ -105,16 +165,23 @@ Exp: Exp Or Exp1
 	$$ = new ExpressionNode("or");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	$$->type = 1;
 }
 | Exp And Exp1
 {
 	$$ = new ExpressionNode("and");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	$$->type = 1;
 }
-| Exp1
+| Not Exp1
 {
-	$$ = $1;
+	$$ = new ExpressionNode();
+	$$->exp_operator = "Not";
+	$$->left_hand_term = $1;
+	if($$->type != 1)
+		YYABORT;
+	$$->type = 1;
 };
 
 Exp1: Exp1 Greater Exp2
@@ -122,102 +189,148 @@ Exp1: Exp1 Greater Exp2
 	$$ = new ExpressionNode("greater");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = 1;
 }
 | Exp1 Lesser Exp2
 {
 	$$ = new ExpressionNode("greater");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = 1;
 }
 | Exp1 GreaterEqual Exp2
 {
 	$$ = new ExpressionNode("GreaterEqual");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = 1;
 }
 | Exp1 LesserEqual Exp2
 {
 	$$ = new ExpressionNode("LesserEqual");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = 1;
 }
 | Exp1 Equal Exp2
 {
 	$$ = new ExpressionNode("Equal");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = 1;
 }
 | Exp1 NotEqual Exp2
 {
 	$$ = new ExpressionNode("NotEqual");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
-};
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = 1;
+}
 | Exp2
 {
 	$$ = $1;
-}
-
+};
 Exp2: Exp2 Plus Exp3
 {
 	$$ = new ExpressionNode("Plus");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = max($1->type,$2->type);
 }
 | Exp2 Minus Exp3
 {
 	$$ = new ExpressionNode("NotEqual");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = max($1->type,$3->type);
 }
 | Exp3
 {
 	$$ = $1;
 };
-Exp3: Expr3 Multiply Term
+Exp3: Exp3 Multiply Term
 {
 	$$ = new ExpressionNode("Multiply");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = 3;
 }
-| Expr3 Divide Term
+| Exp3 Divide Term
 {
 	$$ = new ExpressionNode("Divide");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type ==  1 || $3->type == 1)
+		YYABORT;
+	$$->type = 3;
 }
-| Expr3 Modulo Term
+| Exp3 Modulo Term
 {
 	$$ = new ExpressionNode("NotEqual");
 	$$->left_hand_term = $1;
 	$$->right_hand_term = $3;
+	if($1->type !=  2 || $3->type != 2)
+		YYABORT;
+	$$->type = 2;
 };
 Term: Column
 {
-
+	$$ = new ExpressionNode();
+	$$->column_name = $1;
+	$$->type = column_map[$1];
 }
 | Value
 {
-	$$ = new ExpressionNode;
-	$$->left_hand_term = NULL;
-	$$->right_hand_term = NULL;
-	$$->
+	$$ = new ExpressionNode();
+	$$->value = $1;
+	$$->type = (floor($1) == $1)?2:3;
 }
 | OpeningBracket Exp ClosingBracket
 {
 	$$ = $2;
-}
-;
+};
 %%
-int yyerror(char *s)
+int yyerror(SelectQuery* select_query,const char* error_msg)
 {
-	printf ("// Failed to parse macrojava code.");
-	return 0;
-  
+	YYABORT;
 }
-int main ()
+SelectQuery* process_query(std::string query)
 {
-	macro_table = (table*)(malloc(sizeof(table)));
-	yyparse();
-	return 0;
+	if(column_map.size() == 0)
+	{
+		column_map["vehicle_id"] = 2;
+		column_map["database_index"] = 2;
+		column_map["oil_life_pct"] = 3;
+		column_map["tire_p_fl"] = column_map["tire_p_fr"] = column_map["tire_p_rl"] = column_map["tire_p_rr"] = 3;
+		column_map["batt_volt"] = 3;
+		column_map["fuel_percentage"] = 3;
+		column_map["accel"] = 1;
+		column_map["seatbelt"] = column_map["door_lock"] = column_map["hard_brake"] = column_map["gear_toggle"] = 1;
+		column_map["clutch"] = column_map["hard_steer"] = 1;  
+		column_map["speed"] = column_map["distance"] = 3;
+	}
+	SelectQuery* select_query;
+	yy_scan_string(query.c_str());
+	yyparse(select_query);
+	yylex_destroy();
+	return select_query;
 }
+
