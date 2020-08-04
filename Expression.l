@@ -10,8 +10,6 @@ value ^(-?)(0|([1-9][0-9]*))(\\.[0-9]+)?$
 identifier [a-zA-Z_][0-9a-zA-Z_]*
 space "\t"|"\n"|"\r"|"\f"|" "
 %% 
-
-"//".* {;}//ignores any comments present in the program. Multiline comments need to be ignored as well.
 {value}  {yylval.value = stoi(yytext);return Value;}
 "+" {return Plus;}
 "-"  {return Minus;}
@@ -21,7 +19,7 @@ space "\t"|"\n"|"\r"|"\f"|" "
 "==" {return Equal;}
 "!=" {return NotEqual;}
 ">=" {return GreaterEqual;}
-"<=" {return LessEqual;}
+"<=" {return LesserEqual;}
 ">" {return Greater;}
 "<" {return Lesser;}
 "!" {return Not;}
@@ -40,7 +38,11 @@ space "\t"|"\n"|"\r"|"\f"|" "
 "DESC" {return Descending;}
 "MIN" {return Minimum;}
 "MAX" {return Maximum;}
-"AVERAGE" {return Average;}
+"AVG" {return Average;}
+"SUM" {return Sum;}
+"VAR" {return Variance;}
+"STDDEV" {return StandardDeviaton;}
+"COUNT" {return Count;}
 {identifier} {yylval.identifier = *(new std::string(yytext)); return Identifier;}
 {space} {;}
 %%
